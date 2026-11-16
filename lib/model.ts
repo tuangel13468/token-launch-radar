@@ -1,10 +1,14 @@
 // Token Launch Radar — model radar-2.
 //
 // One snapshot of the protocol universe in, one ranked board out. The board covers every slug in
-// the snapshot's watchlist (the floor, never a ceiling) and every other rankable pre-token protocol
-// the snapshot carries: 198 rows here, not a 200-row sample. A protocol is pre-token when its
-// record carries no token (no market cap, no CoinGecko id, no symbol); the live-token protocols
-// are kept apart and shown with the market's own values, never mixed into the ranked board.
+// the snapshot's watchlist (the floor, never a ceiling) and every other protocol that passes the
+// house's own launch-subject rule, above or below the watchlist floor: no token recorded, and
+// not a wrapped, staked or bridged product of a token that already trades. That rule is the
+// one the snapshot's watchlist was built with, minus its $50M TVL floor, so the board finds
+// the early subjects the list leaves out without ranking wrappers of tokens that trade —
+// WBTC, Binance staked ETH and USDT0 are named in the rules as off the list for exactly that
+// reason, and they stay off this board too. The live-token protocols are kept apart and shown
+// with the market's own values, never mixed into the ranked board.
 //
 // Implied value follows only from the snapshot's own figures, never from a hand-kept list of
 // names. The one number the model does not take from a single protocol's row is the category
@@ -252,58 +256,49 @@ export function impliedValue(
   return { implied, growthPct, growthMult, maturityMult, breadthMult, age };
 }
 
-/** DefiLlama's version-marker rule: a name ending in a release is a pool of another protocol. */
-const VERSIONED = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
-
-/** A name carrying a whole word that marks a wrapped or staked product of another token. */
-const WRAPPED_OR_STAKED = /\b(wrapped|staked|staking)\b/i;
-
-/** Categories that are a wrapped, staked or bridged product of a token that already trades. */
-const PRODUCT_CATEGORIES = new Set(['Bridge', 'Canonical Bridge', 'Liquid Staking', 'Liquid Restaking', 'Restaked BTC', 'CEX']);
-
-/** Exchanges whose name at the start of a protocol's name marks it as their product. */
-const EXCHANGES = ['Binance', 'Coinbase', 'Bybit', 'Kraken', 'Bitget', 'OKX', 'Bitfinex', 'Gemini'];
-
-/** Whether a protocol records no token at all. */
+/**
+ * Whether a protocol records no token at all (no market cap, CoinGecko id or symbol).
+ * That alone does not make it a launch subject: a wrapped or staked product of a token
+ * that already trades records no token of its own, and its "launch" already happened.
+ */
 export function isPreToken(p: SnapshotProtocol): boolean {
   return p.mcap_usd === null && p.gecko_id === null && p.symbol === null;
 }
 
-/**
- * Whether a protocol is one the board may rank. This is the house's own watchlist rule
- * (input/README.md), minus the TVL floor: pre-token, not a wrapped, staked or bridged product
- * of a token that already trades, not a versioned pool, not an exchange's own product. WBTC is
- * Bitcoin on Ethereum and Binance staked ETH is ETH in Binance's staking product: neither is a
- * protocol still waiting on a launch of its own, so neither is ranked, whatever its TVL says.
- */
-export function isRankable(p: SnapshotProtocol): boolean {
-  if (!isPreToken(p)) return false;
-  if (PRODUCT_CATEGORIES.has(p.category ?? '')) return false;
-  if (VERSIONED.test(p.name)) return false;
-  if (WRAPPED_OR_STAKED.test(p.name)) return false;
-  if (EXCHANGES.some((e) => p.name.startsWith(e))) return false;
-  return true;
-}
+/** Categories the house's watchlist rule keeps off the list: bridges, liquid staking and restaking, and exchanges. */
+const EXCLUDED_CATEGORIES = new Set(['Bridge', 'Canonical Bridge', 'Liquid Staking', 'Liquid Restaking', 'Restaked BTC', 'CEX']);
 
-/** The snapshot's protocol by slug. */
-function bySlug(protocols: SnapshotProtocol[]): Map<string, SnapshotProtocol> {
-  return new Map(protocols.map((p) => [p.slug, p]));
+/** Exchange names the house's rule keeps off the list when a protocol's name begins with one. */
+const EXCHANGE_PREFIXES = ['Binance', 'Coinbase', 'Bybit', 'Kraken', 'Bitget', 'OKX', 'Bitfinex', 'Gemini'];
+
+/**
+ * Whether a protocol is a genuine token-launch subject: the house's watchlist rule, minus
+ * its $50M TVL floor (a subject below the floor is no worse a subject). No token recorded,
+ * and not a wrapped, staked or bridged product of a token that already trades: its category
+ * is not Bridge, Canonical Bridge, Liquid Staking, Liquid Restaking, Restaked BTC or CEX,
+ * its name does not end in a version marker (a space followed by V2, v2 or 2.0), carries no
+ * whole word wrapped, staked or staking, and does not begin with an exchange's name.
+ * The snapshot carries no parent protocol, so that part of the house rule cannot be applied;
+ * the watchlist itself is still covered in full, which the build asserts.
+ */
+export function isLaunchSubject(p: SnapshotProtocol): boolean {
+  if (!isPreToken(p)) return false;
+  if (p.category !== null && EXCLUDED_CATEGORIES.has(p.category)) return false;
+  if (/\s(V2|v2|2\.0)$/.test(p.name)) return false;
+  if (/\b(wrapped|staked|staking)\b/i.test(p.name)) return false;
+  if (EXCHANGE_PREFIXES.some((e) => p.name.startsWith(e))) return false;
+  return true;
 }
 
 /** The protocols the board ranks, strongest first, with ranks 1..n. */
 export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; multiples: { byCategory: Record<string, number>; global: number } } {
   const multiples = categoryMultiples(snapshot, model);
-  const index = bySlug(snapshot.protocols);
   const chosen = new Map<string, SnapshotProtocol>();
-  // The watchlist is the floor: every slug it names.
-  for (const slug of snapshot.watchlist) {
-    const p = index.get(slug);
-    if (p !== undefined) chosen.set(slug, p);
-  }
-  // The early radar: every other rankable pre-token protocol the snapshot carries, above or
-  // below the watchlist floor. A chosen protocol stays chosen.
+  // Every genuine launch subject, watchlist or not, above or below the floor: the watchlist
+  // is the floor the board must cover, and the rest of the subjects are the early radar the
+  // board exists to find. Wrapped, staked and bridged products of tokens that trade are out.
   for (const p of snapshot.protocols) {
-    if (!chosen.has(p.slug) && isRankable(p)) chosen.set(p.slug, p);
+    if (isLaunchSubject(p)) chosen.set(p.slug, p);
   }
 
   const scored = [...chosen.values()].map((p) => {
@@ -371,82 +366,287 @@ function holdDaysFor(age: number | null): number {
   return 30;
 }
 
-/** The category's one action, in the words a farmer can follow. */
-function actionFor(p: SnapshotProtocol, capital: number, chain: string): string {
-  const c = (p.category ?? '').toLowerCase();
-  const name = p.name;
-  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) return `Supply $${capital} of USDC to ${name} on ${chain} and keep the position open.`;
-  if (c.includes('dex') || c.includes('amm')) return `Provide $${capital} of liquidity to ${name}'s main pool on ${chain} and keep the position open.`;
-  if (c.includes('yield aggregator') || c.includes('leveraged farm') || c.includes('yield') || c.includes('curator') || c.includes('allocator') || c.includes('indexes') || c.includes('index')) return `Deposit $${capital} into a ${name} vault on ${chain} and keep the shares.`;
-  if (c.includes('bridge')) return `Bridge $${capital} of USDC to ${chain} through ${name} and use the bridged funds in its app.`;
-  if (c.includes('liquid staking') || c.includes('restak') || c.includes('staking')) return `Stake $${capital} of the chain's staking asset through ${name} and keep the receipt token.`;
-  if (c.includes('perpetual') || c.includes('derivative') || c.includes('options') || c.includes('synthetic')) return `Deposit $${capital} of USDC as margin on ${name} and open one small hedged position.`;
-  if (c.includes('prediction')) return `Fund $${capital} and place one market position on ${name}.`;
-  if (c.includes('rwa')) return `Mint $${capital} of the protocol's yield-bearing asset on ${chain} and hold it.`;
-  if (c.includes('stable')) return `Mint or deposit $${capital} of the stable asset through ${name} on ${chain}.`;
-  if (c.includes('insurance')) return `Buy $${capital} of cover from ${name} on ${chain} and keep the policy active.`;
-  if (c.includes('launchpad')) return `Stake $${capital} through ${name} to qualify for its next allocation on ${chain}.`;
-  if (c.includes('nft marketplace')) return `List one NFT for sale or buy one through ${name} on ${chain} with $${capital} of funds.`;
-  if (c.includes('farm')) return `Deposit $${capital} into ${name}'s farm on ${chain} and keep the position staked.`;
-  if (c.includes('payment')) return `Send $${capital} through ${name}'s rails on ${chain} and keep the receipt.`;
-  return `Deposit $${capital} of USDC into ${name} on ${chain} and keep the position open.`;
+/** Gas for one onchain action, from the protocol's first chain. */
+function gasFor(chain: string): number {
+  return chain === 'Ethereum' ? 8 : 3;
 }
 
-/** The weekly qualifying action, by category: the habit that keeps a farmer eligible. */
-function weeklyFor(p: SnapshotProtocol): string {
-  const c = (p.category ?? '').toLowerCase();
-  if (c.includes('lend') || c.includes('cdp')) return `Repay a small amount and re-supply it, so the position shows fresh activity.`;
-  if (c.includes('dex') || c.includes('amm')) return `Swap a small amount in the pool and add a little liquidity back.`;
-  if (c.includes('bridge')) return `Bridge a small amount back to the chain you started from.`;
-  if (c.includes('staking') || c.includes('restak')) return `Claim the staking rewards and restake them.`;
-  if (c.includes('perpetual') || c.includes('derivative') || c.includes('options')) return `Close one small position and open another, keeping the margin in place.`;
-  if (c.includes('prediction')) return `Settle one market and open a position in another.`;
-  if (c.includes('yield') || c.includes('curator') || c.includes('allocator') || c.includes('farm')) return `Compound the vault's rewards back into the same vault.`;
-  return `Make one qualifying action, such as a deposit, a swap or a vote.`;
+/** Gas for one weekly onchain action, from the protocol's first chain. */
+function gasWeeklyFor(chain: string): number {
+  return chain === 'Ethereum' ? 4 : 1;
+}
+
+/** What one farm position is built from: the protocol's own name, capital, chain and hold. */
+interface PlanCtx {
+  name: string;
+  capital: number;
+  half: number;
+  quarter: number;
+  chain: string;
+  hold: number;
+  gas: number;
+  weeklyGas: number;
+}
+
+/** One category's own actions: the setup, the open, the weekly habit, a second action, the hold. */
+interface CategoryPlan {
+  setup?: FarmStep;
+  open: FarmStep;
+  weekly: FarmStep;
+  extra: FarmStep;
+  hold?: FarmStep;
+}
+
+/** The setup every onchain plan starts with: a fresh wallet, nothing else in it. */
+function walletSetup(): FarmStep {
+  return {
+    text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
+    cost: 'under $3 of gas for the first transaction',
+    time: '5 minutes',
+  };
+}
+
+/** The hold every plan ends on: the position stays put long enough to be counted twice. */
+function defaultHold(c: PlanCtx): FarmStep {
+  return {
+    text: `Hold the position for at least ${c.hold} days so the activity is counted in more than one snapshot.`,
+    cost: `the $${c.capital} stays in the position`,
+    time: `${c.hold} days`,
+  };
+}
+
+/** The rewards check, kept conditional: a protocol may publish no page at all. */
+function rewardsStep(name: string): FarmStep {
+  return {
+    text: `If ${name} publishes a points or rewards page, open it from the link it publishes and check what you earned.`,
+    cost: 'no fee to check, and never pay to claim',
+    time: '10 minutes',
+  };
+}
+
+/** The log every plan ends with: the record that lets a farmer repeat or unwind it. */
+function logStep(): FarmStep {
+  return {
+    text: `Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.`,
+    cost: 'nothing but the log',
+    time: '5 minutes',
+  };
+}
+
+/** One open step: the capital in, the gas beside it. */
+function openStep(text: string, c: PlanCtx): FarmStep {
+  return { text, cost: `$${c.capital} of capital and about $${c.gas} of gas`, time: '15 minutes to set up' };
+}
+
+/** One weekly step: the habit, on the same wallet, once a week. */
+function weeklyStep(text: string, c: PlanCtx): FarmStep {
+  return { text: `${text} Do it once a week, on the same wallet, so the activity forms a pattern.`, cost: `about $${c.weeklyGas} of gas a week`, time: '10 minutes a week' };
+}
+
+const dexsPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Provide $${c.capital} of liquidity to ${c.name}'s main pool on ${c.chain} in a balanced pair and keep the position open.`, c),
+  weekly: weeklyStep(`Swap a small amount through the pool and add a little liquidity back.`, c),
+  extra: { text: `Open a second, smaller position in another pool of ${c.name} on ${c.chain} with $${c.half} so the activity is not one pool only.`, cost: `$${c.half} of capital and about $${c.gas} of gas`, time: '15 minutes' },
+});
+
+const lendingPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Supply $${c.capital} of USDC to ${c.name} on ${c.chain} and keep the supply position open.`, c),
+  weekly: weeklyStep(`Repay a small amount and re-supply it, so the position shows fresh activity.`, c),
+  extra: { text: `Borrow a small amount against the supplied collateral and repay it within the week.`, cost: `about $${c.gas} of gas, and the borrow repaid in full`, time: '15 minutes' },
+});
+
+const liquidStakingPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Stake $${c.capital} of the chain's staking asset through ${c.name} on ${c.chain} and keep the receipt token.`, c),
+  weekly: weeklyStep(`Claim the staking rewards and restake them through ${c.name}.`, c),
+  extra: { text: `Use the receipt token as collateral in a lending market on ${c.chain} and unwind it within the week.`, cost: `about $${c.gas} of gas, and the collateral returned`, time: '15 minutes' },
+});
+
+const bridgePlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Bridge $${c.capital} of USDC to ${c.chain} through ${c.name} and use the bridged funds in its app.`, c),
+  weekly: weeklyStep(`Bridge a small amount back to the chain you started from.`, c),
+  extra: { text: `Spend the bridged funds once inside ${c.name}'s own app on ${c.chain}, so the bridge is not the only action on record.`, cost: `about $${c.gas} of gas`, time: '10 minutes' },
+  hold: { text: `Keep the bridged funds deployed on ${c.chain} for at least ${c.hold} days before moving them again.`, cost: `the $${c.capital} stays deployed`, time: `${c.hold} days` },
+});
+
+const canonicalBridgePlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Bridge $${c.capital} of USDC through ${c.name} to ${c.chain} and use the funds on the other side.`, c),
+  weekly: weeklyStep(`Bridge a small amount back through ${c.name}.`, c),
+  extra: { text: `Bridge a second amount of $${c.half} through ${c.name} from a different wallet, so the activity is not tied to one address.`, cost: `$${c.half} of capital and about $${c.gas} of gas`, time: '15 minutes' },
+  hold: { text: `Keep the bridged funds on ${c.chain} for at least ${c.hold} days before moving them again.`, cost: `the $${c.capital} stays on ${c.chain}`, time: `${c.hold} days` },
+});
+
+const derivativesPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Deposit $${c.capital} of USDC as margin on ${c.name} and open one small hedged position.`, c),
+  weekly: weeklyStep(`Close one small position and open another, keeping the margin in place.`, c),
+  extra: { text: `Top up the margin by $${c.quarter} if the market moves against the position, so it is not liquidated.`, cost: `$${c.quarter} of capital and about $${c.gas} of gas`, time: '10 minutes' },
+  hold: { text: `Keep the margin on ${c.name} for at least ${c.hold} days, trading at least once a week.`, cost: `the $${c.capital} stays as margin`, time: `${c.hold} days` },
+});
+
+const yieldPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Deposit $${c.capital} into a ${c.name} vault on ${c.chain} and keep the shares.`, c),
+  weekly: weeklyStep(`Compound the vault's rewards back into the same vault.`, c),
+  extra: { text: `Add a second deposit of $${c.half} after two weeks so the position grows in steps.`, cost: `$${c.half} of capital and about $${c.gas} of gas`, time: '10 minutes' },
+});
+
+const yieldAggregatorPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Deposit $${c.capital} into an auto-compounding vault on ${c.name} on ${c.chain} and keep the shares.`, c),
+  weekly: weeklyStep(`Move a small amount from one ${c.name} vault to another to show activity across its strategies.`, c),
+  extra: { text: `Deposit the harvested rewards back into the same vault instead of withdrawing them.`, cost: `about $${c.gas} of gas`, time: '10 minutes' },
+});
+
+const riskCuratorsPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Deposit $${c.capital} into a vault curated by ${c.name} on ${c.chain} and keep the shares.`, c),
+  weekly: weeklyStep(`Move a small amount between two vaults ${c.name} curates on ${c.chain}.`, c),
+  extra: { text: `Add a second deposit of $${c.half} to a different vault ${c.name} curates on ${c.chain}.`, cost: `$${c.half} of capital and about $${c.gas} of gas`, time: '10 minutes' },
+});
+
+const cexPlan = (c: PlanCtx): CategoryPlan => ({
+  setup: { text: `Open an account on ${c.name} and turn on two-factor authentication before you deposit anything.`, cost: 'nothing to open the account', time: '10 minutes' },
+  open: { text: `Deposit $${c.capital} of USDC to ${c.name} over ${c.chain} and place one spot buy with it.`, cost: `$${c.capital} of capital and about $2 of trading fees`, time: '15 minutes to set up' },
+  weekly: { text: `Place one small spot trade a week on ${c.name} so the account shows steady activity. Do it once a week, on the same account, so the activity forms a pattern.`, cost: 'about $1 of trading fees a week', time: '10 minutes a week' },
+  extra: { text: `Withdraw a small amount to your own wallet and deposit it back, so the account shows flow in both directions.`, cost: 'about $2 of withdrawal fees', time: '10 minutes' },
+  hold: { text: `Keep a balance on ${c.name} for at least ${c.hold} days and trade once a week.`, cost: `the $${c.capital} stays on the account`, time: `${c.hold} days` },
+});
+
+const rwaPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Mint $${c.capital} of the yield-bearing asset ${c.name} issues on ${c.chain} and hold it.`, c),
+  weekly: weeklyStep(`Claim the yield the asset pays and reinvest it into the same asset.`, c),
+  extra: { text: `Mint a second amount of $${c.half} after two weeks so the holding grows in steps.`, cost: `$${c.half} of capital and about $${c.gas} of gas`, time: '10 minutes' },
+});
+
+const cdpPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Lock $${c.capital} of collateral in ${c.name} on ${c.chain} and mint a small amount of its stable asset.`, c),
+  weekly: weeklyStep(`Top up the collateral with a small amount to keep the ratio healthy.`, c),
+  extra: { text: `Repay part of the minted stable asset and mint it again, so the position shows a full cycle.`, cost: `about $${c.gas} of gas, and the minted amount repaid in full`, time: '15 minutes' },
+});
+
+const predictionPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Deposit $${c.capital} into ${c.name} on ${c.chain} and place one position in a market.`, c),
+  weekly: weeklyStep(`Settle one market and open a position in another.`, c),
+  extra: { text: `Hold positions in two markets at once on ${c.name} so the activity is not a single bet.`, cost: `about $${c.gas} of gas, and the positions close at their markets' end`, time: '10 minutes' },
+});
+
+const chainPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Bridge $${c.capital} of USDC to ${c.chain} and use it in two of the chain's own apps.`, c),
+  weekly: weeklyStep(`Make one transaction a week on ${c.chain} from the same wallet.`, c),
+  extra: { text: `Use a second app on ${c.chain} with part of the funds so the wallet's history is not a single app.`, cost: `about $${c.gas} of gas`, time: '15 minutes' },
+});
+
+const stakingPoolPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Stake $${c.capital} through ${c.name}'s pool on ${c.chain} and keep the stake.`, c),
+  weekly: weeklyStep(`Claim the pool rewards and restake them.`, c),
+  extra: { text: `Add a second stake of $${c.half} after two weeks.`, cost: `$${c.half} of capital and about $${c.gas} of gas`, time: '10 minutes' },
+});
+
+const basisPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Deposit $${c.capital} of USDC as margin on ${c.name} and open one small basis position on ${c.chain}.`, c),
+  weekly: weeklyStep(`Rebalance the hedge so the long and short legs stay matched.`, c),
+  extra: { text: `Close the position after ${c.hold} days, take the funding earned, and open a fresh one.`, cost: `about $${c.gas} of gas, and the margin returned`, time: '15 minutes' },
+  hold: { text: `Keep margin on ${c.name} for at least ${c.hold} days, rebalancing the hedge weekly.`, cost: `the $${c.capital} stays as margin`, time: `${c.hold} days` },
+});
+
+const allocatorPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Allocate $${c.capital} to a strategy ${c.name} runs on ${c.chain}.`, c),
+  weekly: weeklyStep(`Review the allocation and move a small amount to a second strategy ${c.name} runs.`, c),
+  extra: { text: `Add a second allocation of $${c.half} to another strategy ${c.name} runs on ${c.chain}.`, cost: `$${c.half} of capital and about $${c.gas} of gas`, time: '10 minutes' },
+  hold: { text: `Leave the allocation in place for at least ${c.hold} days so the strategy is measured on a full window.`, cost: `the $${c.capital} stays allocated`, time: `${c.hold} days` },
+});
+
+const leveragedFarmingPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Deposit $${c.capital} into a leveraged farm position on ${c.name} on ${c.chain} and keep it open.`, c),
+  weekly: weeklyStep(`Rebalance the leverage so the position stays within its target range.`, c),
+  extra: { text: `Close part of the position after ${c.hold} days and re-open it at the same leverage.`, cost: `about $${c.gas} of gas, and the closed part returned`, time: '15 minutes' },
+});
+
+const insurancePlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Buy $${c.capital} of cover from ${c.name} on ${c.chain} and keep the policy active.`, c),
+  weekly: weeklyStep(`Check the policy's status and top up the cover if the covered amount grows.`, c),
+  extra: { text: `Buy a second, smaller policy from ${c.name} on ${c.chain} for a different risk.`, cost: `$${c.half} of cover and about $${c.gas} of gas`, time: '15 minutes' },
+});
+
+const paymentsPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Send $${c.capital} through ${c.name} on ${c.chain} and keep the receipt.`, c),
+  weekly: weeklyStep(`Send one small payment a week through ${c.name} on ${c.chain}.`, c),
+  extra: { text: `Receive one payment through ${c.name} as well, so the wallet shows flow in both directions.`, cost: `about $${c.gas} of gas`, time: '10 minutes' },
+});
+
+const btcPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Hold $${c.capital} of ${c.name}'s BTC-backed asset on ${c.chain}.`, c),
+  weekly: weeklyStep(`Move a small amount of the asset and move it back.`, c),
+  extra: { text: `Use the asset once in an app on ${c.chain} that accepts it, then hold it again.`, cost: `about $${c.gas} of gas`, time: '15 minutes' },
+});
+
+const cardPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Load $${c.capital} onto the card ${c.name} issues and spend a small amount with it.`, c),
+  weekly: weeklyStep(`Spend a small amount with the card each week.`, c),
+  extra: { text: `Top up the card by $${c.half} after two weeks.`, cost: `$${c.half} of capital and no card fee`, time: '10 minutes' },
+  hold: { text: `Keep the card funded for at least ${c.hold} days so the spending forms a pattern.`, cost: `the $${c.capital} stays on the card`, time: `${c.hold} days` },
+});
+
+const genericPlan = (c: PlanCtx): CategoryPlan => ({
+  open: openStep(`Deposit $${c.capital} of USDC into ${c.name} on ${c.chain} and keep the position open.`, c),
+  weekly: weeklyStep(`Make one qualifying action a week, such as a deposit, a swap or a vote.`, c),
+  extra: { text: `Add a second deposit of $${c.half} after two weeks.`, cost: `$${c.half} of capital and about $${c.gas} of gas`, time: '10 minutes' },
+});
+
+/** The plan a category farms with, by the snapshot's own category name. */
+function planFor(category: string | null): (c: PlanCtx) => CategoryPlan {
+  const c = (category ?? '').toLowerCase();
+  if (c === 'dexs' || c === 'liquidity manager') return dexsPlan;
+  if (c === 'lending' || c === 'uncollateralized lending' || c === 'collateral markets') return lendingPlan;
+  if (c === 'liquid staking' || c === 'restaking' || c === 'liquid restaking' || c === 'restaked btc') return liquidStakingPlan;
+  if (c === 'bridge' || c === 'cross chain bridge') return bridgePlan;
+  if (c === 'canonical bridge') return canonicalBridgePlan;
+  if (c === 'derivatives' || c === 'interest rate derivatives' || c === 'options vault') return derivativesPlan;
+  if (c === 'yield' || c === 'farm') return yieldPlan;
+  if (c === 'yield aggregator' || c === 'indexes') return yieldAggregatorPlan;
+  if (c === 'risk curators') return riskCuratorsPlan;
+  if (c === 'cex' || c === 'cedefi') return cexPlan;
+  if (c === 'rwa') return rwaPlan;
+  if (c === 'cdp' || c === 'cdp manager' || c === 'dual-token stablecoin' || c === 'stablecoin wrapper') return cdpPlan;
+  if (c === 'prediction market') return predictionPlan;
+  if (c === 'chain') return chainPlan;
+  if (c === 'staking pool') return stakingPoolPlan;
+  if (c === 'basis trading') return basisPlan;
+  if (c === 'onchain capital allocator') return allocatorPlan;
+  if (c === 'leveraged farming') return leveragedFarmingPlan;
+  if (c === 'insurance') return insurancePlan;
+  if (c === 'payments') return paymentsPlan;
+  if (c === 'anchor btc' || c === 'decentralized btc') return btcPlan;
+  if (c === 'crypto card issuer') return cardPlan;
+  return genericPlan;
 }
 
 /**
- * A protocol's farm plan: six steps, each an action with a cost and a time. The plan is derived
- * from the protocol's own record (category, chains, TVL, age), never from a hand-written list
- * of names.
+ * A protocol's farm plan: seven steps, each an action with a cost and a time. The plan is
+ * derived from the protocol's own record (category, chains, TVL, age), never from a hand-written
+ * list of names: the category picks the actions, the TVL picks the amounts, the age picks the
+ * hold, and the first chain picks the gas. No step names a product, a points program or a token
+ * the snapshot does not carry; the rewards check is conditional on the protocol publishing one.
  */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
   const capital = capitalFor(p);
   const hold = holdDaysFor(age);
-  const action = actionFor(p, capital, chain);
-  const weekly = weeklyFor(p);
+  const ctx: PlanCtx = {
+    name: p.name,
+    capital,
+    half: Math.max(25, Math.round(capital / 2)),
+    quarter: Math.max(10, Math.round(capital / 4)),
+    chain,
+    hold,
+    gas: gasFor(chain),
+    weeklyGas: gasWeeklyFor(chain),
+  };
+  const plan = planFor(p.category)(ctx);
   return [
-    {
-      text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
-      cost: 'under $3 of gas for the first transaction',
-      time: '5 minutes',
-    },
-    {
-      text: action,
-      cost: `$${capital} of capital and about $${capital >= 150 ? 8 : 4} of gas`,
-      time: '15 minutes to set up',
-    },
-    {
-      text: `${weekly} Do it once a week, on the same wallet, so the activity forms a pattern.`,
-      cost: 'about $2 of gas a week',
-      time: '10 minutes a week',
-    },
-    {
-      text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
-      cost: `the $${capital} stays in the position`,
-      time: `${hold} days`,
-    },
-    {
-      text: `Before you withdraw, open ${p.name}'s own points or rewards page from the link it publishes and check what you earned.`,
-      cost: 'no fee to check, and never pay to claim',
-      time: '10 minutes',
-    },
-    {
-      text: `Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.`,
-      cost: 'nothing but the log',
-      time: '5 minutes',
-    },
+    plan.setup ?? walletSetup(),
+    plan.open,
+    plan.weekly,
+    plan.extra,
+    plan.hold ?? defaultHold(ctx),
+    rewardsStep(p.name),
+    logStep(),
   ];
 }
 

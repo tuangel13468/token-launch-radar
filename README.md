@@ -1,10 +1,10 @@
 # token-launch-radar
 
 [![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
-[![rank](https://make.fun/badge/token-radar-01/tuangel134/token-launch-radar/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
-[![reward](https://make.fun/badge/token-radar-01/tuangel134/token-launch-radar/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![rank](https://make.fun/badge/token-radar-01/tuangel13468/token-launch-radar/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![reward](https://make.fun/badge/token-radar-01/tuangel13468/token-launch-radar/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 
-A dashboard that ranks every pre-token DeFi protocol in the snapshot by the implied value of its future token, with a concrete six-step farm plan for each one.
+A dashboard that ranks every genuine token-launch subject in the snapshot — 204 protocols under the house's own rule (no token recorded, not a wrapped, staked or bridged product of a token that already trades) — by the implied value of its future token, with a concrete seven-step farm plan for each one.
 
 ## Run it
 

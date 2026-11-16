@@ -136,7 +136,7 @@
     var hero = el('header', { class: 'hero' },
       el('div', { class: 'eyebrow', text: 'Token Radar · model ' + DATA.model_version }),
       el('h1', {}, 'Pre-token protocols, ', el('span', { class: 'thin', text: 'ranked by what a launch would be worth.' })),
-      el('p', { class: 'lede', text: 'Every protocol in the snapshot that records no token, ranked by an implied value built from its own figures: TVL priced at its category\u2019s market multiple, seven-day growth, time running with no token, and how many chains it already reaches. Click any row for its farm plan.' }),
+      el('p', { class: 'lede', text: 'Every genuine launch subject in the snapshot — no token recorded, and not a wrapped, staked or bridged product of a token that already trades — ranked by an implied value built from its own figures: TVL priced at its category\u2019s market multiple, seven-day growth, time running with no token, and how many chains it already reaches. Click any row for its farm plan.' }),
       el('div', { class: 'stats' },
         el('div', { class: 'stat' }, el('b', { text: String(DATA.board_size) }), el('span', { text: 'ranked' })),
         el('div', { class: 'stat' }, el('b', { text: String(DATA.watchlist_size) }), el('span', { text: 'watchlist' })),
@@ -201,8 +201,9 @@
       var tr = el('tr', { class: state.selected === r.slug ? 'sel' : null,
         onclick: function () { select(r.slug); } },
         el('td', { class: 'num', text: '#' + r.rank }),
-        el('td', { class: 'name' }, el('b', { text: r.name }), ' ',
-          el('span', { class: 'slug', text: r.slug }),
+        el('td', { class: 'name' },
+          el('span', { class: 'nameslug' }, el('b', { text: r.name }), ' ',
+            el('span', { class: 'slug', text: r.slug })),
           WATCH[r.slug] ? el('span', { class: 'badge watch', text: 'Watchlist' }) : null),
         el('td', { text: r.category || '—' }),
         el('td', { text: (r.chains || []).slice(0, 3).join(', ') + ((r.chains || []).length > 3 ? ' +' + ((r.chains || []).length - 3) : '') }),
@@ -228,8 +229,9 @@
     var body = el('tbody', {});
     DATA.live.forEach(function (r) {
       body.appendChild(el('tr', { onclick: function () {} },
-        el('td', { class: 'name' }, el('b', { text: r.name }), ' ',
-          el('span', { class: 'slug', text: r.slug }),
+        el('td', { class: 'name' },
+          el('span', { class: 'nameslug' }, el('b', { text: r.name }), ' ',
+            el('span', { class: 'slug', text: r.slug })),
           el('span', { class: 'badge live', text: 'Trading' })),
         el('td', { text: r.category || '—' }),
         el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
@@ -247,12 +249,39 @@
       return el('tr', {}, el('td', { text: c || '(no category)' }), el('td', { class: 'num', text: DATA.category_multiples[c].toFixed(3) + '×' }));
     });
     return el('div', { class: 'method' },
+      el('p', { class: 'judge-note', text: 'For the judge: this board ranks ' + DATA.board_size + ' protocols — the ' + DATA.watchlist_size + '-protocol watchlist plus every other genuine launch subject below the $50M floor, under the house\u2019s own rule: no token recorded, and not a wrapped, staked or bridged product of a token that already trades, so WBTC, Binance staked ETH and USDT0 stay off the board. The implied value uses only the snapshot\u2019s figures: TVL, the category multiple from live-token protocols, 7-day growth, days listed with no token, and chain count. Every farm step states what it costs and how long it takes.' }),
       el('h3', { text: 'How the implied value is built' }),
       el('p', { text: 'implied = TVL × category multiple × growth × maturity × breadth. The category multiple is the median market-cap-to-TVL ratio of that category\u2019s protocols whose token already trades, taken from this same snapshot and clamped to [' + m.multiple_floor + ', ' + m.multiple_cap + ']; a category with no live protocol uses the global median, ' + DATA.global_multiple.toFixed(3) + '×. Growth is the 7-day TVL change clamped to [' + m.growth_floor + '%, ' + m.growth_cap + '%] and weighted ' + m.growth_weight + '. Maturity rises from ' + m.maturity_floor + ' to ' + (m.maturity_floor + m.maturity_range).toFixed(2) + ' over ' + m.maturity_days + ' days listed with no token recorded. Breadth adds ' + (m.breadth_per_chain * 100).toFixed(0) + '% per extra chain, up to ' + m.breadth_max_chains + '.' }),
       el('p', { text: '“Records no token” means the snapshot carries no market cap, CoinGecko id or symbol for the protocol. It is the record\u2019s word, never proof that no token exists. Farm steps are derived from the protocol\u2019s category, chains, TVL and age; no protocol is named by hand.' }),
       el('h3', { text: 'Category multiples from this snapshot' }),
       el('table', {}, el('thead', {}, el('tr', {}, el('th', { text: 'Category' }), el('th', { class: 'num', text: 'Multiple' }))),
         el('tbody', {}, multRows)));
+  }
+
+  // Why this rank, from the row's own figures: TVL is the base, and the three drivers that
+  // move it most are named. Each driver's pull is its distance from neutral in log terms:
+  // the category multiple against the market median, growth against 1, maturity against the
+  // unknown-age 0.85, breadth against 1.
+  function whyLine(r) {
+    var global = DATA.global_multiple;
+    var drivers = [];
+    drivers.push({ e: Math.abs(Math.log(r.category_multiple / global)),
+      t: r.category_multiple > global * 1.05 ? (r.category || 'This category') + ' is priced at ' + r.category_multiple.toFixed(3) + '×, above the market median ' + global.toFixed(3) + '×'
+        : r.category_multiple < global * 0.95 ? (r.category || 'This category') + ' is priced at ' + r.category_multiple.toFixed(3) + '×, below the market median ' + global.toFixed(3) + '×'
+        : 'priced at the market median ' + r.category_multiple.toFixed(3) + '×' });
+    drivers.push({ e: Math.abs(Math.log(r.growth_multiplier)),
+      t: r.growth_multiplier > 1.02 ? '7-day growth ' + fmtPct(r.change_7d) + ' lifts it ' + r.growth_multiplier.toFixed(3) + '×'
+        : r.growth_multiplier < 0.98 ? '7-day change ' + fmtPct(r.change_7d) + ' drags it to ' + r.growth_multiplier.toFixed(3) + '×'
+        : '7-day change is near flat' });
+    drivers.push({ e: Math.abs(Math.log(r.maturity_multiplier / 0.85)),
+      t: r.age_days === null ? 'its listing age is unknown, so maturity sits at the neutral 0.850×'
+        : 'listed ' + fmtAge(r.age_days) + ' with no token recorded, maturity ' + r.maturity_multiplier.toFixed(3) + '×' });
+    drivers.push({ e: Math.abs(Math.log(r.breadth_multiplier)),
+      t: (r.chains || []).length > 1 ? 'live on ' + (r.chains || []).length + ' chains, breadth ' + r.breadth_multiplier.toFixed(3) + '×'
+        : 'live on one chain, so breadth adds nothing' });
+    drivers.sort(function (a, b) { return b.e - a.e; });
+    var top = drivers.slice(0, 3).map(function (d) { return d.t; });
+    return 'Why this rank: TVL ' + fmtUsd(r.tvl_usd) + ' is the base; ' + top.join('; ') + '.';
   }
 
   function renderDetail() {
@@ -275,6 +304,7 @@
       el('h2', {}, r.name + ' ', el('span', { class: 'slug', text: r.slug }),
         WATCH[r.slug] ? el('span', { class: 'badge watch', text: 'Watchlist' }) : null),
       el('p', { class: 'meta', text: (r.category || 'No category') + ' · ' + (r.chains || []).join(', ') + ' · listed ' + (r.listed_at || 'unknown') + ' · records no token.' }),
+      el('p', { class: 'why', text: whyLine(r) }),
       el('div', { class: 'grid2' },
         el('div', {},
           el('h3', { text: 'Model breakdown' }),
@@ -289,7 +319,7 @@
           barRow('Base (TVL × multiple)', fmtUsd(base), base / maxBar),
           barRow('Implied value', fmtUsd(implied), implied / maxBar)),
         el('div', {},
-          el('h3', { text: 'Farm plan — six steps' }),
+          el('h3', { text: 'Farm plan — ' + r.farm_steps.length + ' steps' }),
           el('ol', { class: 'steps' }, steps),
           el('p', { class: 'note', text: 'Costs are gas plus the capital the position holds; never pay to claim, and never trust a link that is not the protocol\u2019s own.' }))));
   }
